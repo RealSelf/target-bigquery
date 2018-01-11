@@ -1,0 +1,5 @@
+{
+    "project_id": "bigquery-public-data",
+    "dataset_id": "samples",
+    "table_id": "github_timeline"
+}
