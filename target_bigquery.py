@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
-import functools
 import io
-import os
 import sys
 import json
 import logging
@@ -16,12 +14,7 @@ import pkg_resources
 from jsonschema import validate
 import singer
 
-import httplib2
-
-from apiclient import discovery
-from oauth2client import client
 from oauth2client import tools
-from oauth2client.file import Storage
 
 from google.cloud import bigquery
 from google.cloud.bigquery import Dataset
@@ -45,36 +38,6 @@ APPLICATION_NAME = 'Singer BigQuery Target'
 
 StreamMeta = collections.namedtuple('StreamMeta', ['schema', 'key_properties', 'bookmark_properties'])
 
-def get_credentials():
-    """Gets valid user credentials from storage.
-
-    If nothing has been stored, or if the stored credentials are invalid,
-    the OAuth2 flow is completed to obtain the new credentials.
-
-    Returns:
-        Credentials, the obtained credential.
-    """
-
-    home_dir = os.path.expanduser('~')
-    credential_dir = os.path.join(home_dir, '.credentials')
-    if not os.path.exists(credential_dir):
-        os.makedirs(credential_dir)
-    credential_path = os.path.join(credential_dir,
-                                   'bigquery.googleapis.com-singer-target.json')
-
-    store = Storage(credential_path)
-    credentials = store.get()
-    if not credentials or credentials.invalid:
-        flow = client.flow_from_clientsecrets(CLIENT_SECRET_FILE, SCOPES)
-        flow.user_agent = APPLICATION_NAME
-        if flags:
-            credentials = tools.run_flow(flow, store, flags)
-        else: # Needed only for compatibility with Python 2.6
-            credentials = tools.run(flow, store)
-        print('Storing credentials to ' + credential_path)
-    return credentials
-
-
 def emit_state(state):
     if state is not None:
         line = json.dumps(state)
@@ -90,7 +53,7 @@ def build_schema(schema):
         schema_mode = "NULLABLE"
         schema_fields = None
 
-        if type(schema['properties'][key]['type']) is list:
+        if isinstance(schema['properties'][key]['type'], list):
             if schema['properties'][key]['type'][0] == "null":
                 schema_mode = 'NULLABLE'
             else:
@@ -117,8 +80,8 @@ def persist_lines(project_id, dataset_id, table_id, lines):
     schemas = {}
     key_properties = {}
 
-    headers_by_stream = {}
-    
+    rows = []
+
     for line in lines:
         try:
             msg = singer.parse_message(line)
@@ -152,14 +115,7 @@ def persist_lines(project_id, dataset_id, table_id, lines):
             except exceptions.Conflict:
                 pass
 
-            rows = [msg.record]
-            errors = bigquery_client.create_rows(table, rows) 
-
-            if not errors:
-                print('Loaded 1 row into {}:{}'.format(dataset_id, table_id))
-            else:
-                print('Errors:')
-                pprint(errors)
+            rows.append(msg.record)
 
             state = None
         elif isinstance(msg, singer.StateMessage):
@@ -174,11 +130,17 @@ def persist_lines(project_id, dataset_id, table_id, lines):
         else:
             raise Exception("Unrecognized message {}".format(msg))
 
-    #print("Schemas: ", schemas[list(schemas.keys())[0]]['properties'])
-    #print("\n\n")
-    #print("Schema keys: ", schemas.keys())
-    return state
+    errors = bigquery_client.create_rows(table, rows)
 
+    if not errors:
+        print('Loaded {} row(s) into {}:{}'.format(len(rows), dataset_id, table_id))
+    else:
+        print('Errors:')
+        pprint(errors)
+
+
+
+    return state
 
 def collect():
     try:
@@ -198,25 +160,17 @@ def collect():
     except:
         logger.debug('Collection request failed')
 
-        
+
 def main():
     with open(flags.config) as input:
         config = json.load(input)
-        
+
     """
     if not config.get('disable_collection', False):
         logger.info('Sending version information to stitchdata.com. ' +
                     'To disable sending anonymous usage data, set ' +
                     'the config parameter "disable_collection" to true')
         threading.Thread(target=collect).start()
-    """
-
-    """
-    credentials = get_credentials()
-    http = credentials.authorize(httplib2.Http())
-    discoveryUrl = ('https://www.googleapis.com/discovery/v1/apis/bigquery/v2/rest')
-    service = discovery.build('bigquery', 'v2', http=http,
-                              discoveryServiceUrl=discoveryUrl)
     """
 
     input = io.TextIOWrapper(sys.stdin.buffer, encoding='utf-8')
