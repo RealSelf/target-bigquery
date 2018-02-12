@@ -145,12 +145,12 @@ def persist_lines(project_id, dataset_id, table_id, lines):
 def collect():
     try:
         version = pkg_resources.get_distribution('target-bigquery').version
-        conn = http.client.HTTPSConnection('collector.stitchdata.com', timeout=10)
+        conn = http.client.HTTPConnection('collector.singer.io', timeout=10)
         conn.connect()
         params = {
             'e': 'se',
             'aid': 'singer',
-            'se_ca': 'target-bigquery',
+            'se_ca': 'target-csv',
             'se_ac': 'open',
             'se_la': version,
         }
@@ -159,7 +159,6 @@ def collect():
         conn.close()
     except:
         logger.debug('Collection request failed')
-
 
 def main():
     with open(flags.config) as input:
