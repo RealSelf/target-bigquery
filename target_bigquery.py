@@ -164,13 +164,11 @@ def main():
     with open(flags.config) as input:
         config = json.load(input)
 
-    """
     if not config.get('disable_collection', False):
         logger.info('Sending version information to stitchdata.com. ' +
                     'To disable sending anonymous usage data, set ' +
                     'the config parameter "disable_collection" to true')
         threading.Thread(target=collect).start()
-    """
 
     input = io.TextIOWrapper(sys.stdin.buffer, encoding='utf-8')
 
