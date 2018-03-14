@@ -86,7 +86,7 @@ The data will be written to the table specified in your `config.json`.
 
 ---
 
-Copyright &copy; 2018 Grayson Williams
+Copyright &copy; 2018 RealSelf, Inc.
 
 [Singer Tap]: https://singer.io
 [Braintree]: https://github.com/singer-io/tap-braintree
