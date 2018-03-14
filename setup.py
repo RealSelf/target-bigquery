@@ -3,7 +3,7 @@
 from setuptools import setup
 
 setup(name='target-bigquery',
-      version='0.0.1',
+      version='1.0.0',
       description='Singer.io target for writing data to Google BigQuery',
       author='Grayson Williams',
       url='https://realself.com',
