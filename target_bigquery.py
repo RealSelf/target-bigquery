@@ -32,7 +32,7 @@ except ImportError:
 logging.getLogger('googleapiclient.discovery_cache').setLevel(logging.ERROR)
 logger = singer.get_logger()
 
-SCOPES = 'https://www.googleapis.com/auth/bigquery'
+SCOPES = ['https://www.googleapis.com/auth/bigquery','https://www.googleapis.com/auth/bigquery.insertdata']
 CLIENT_SECRET_FILE = 'client_secret.json'
 APPLICATION_NAME = 'Singer BigQuery Target'
 
@@ -45,42 +45,69 @@ def emit_state(state):
         sys.stdout.write("{}\n".format(line))
         sys.stdout.flush()
 
+def define_schema(field, name):
+    schema_name = name
+    schema_type = "STRING"
+    schema_mode = "NULLABLE"
+    schema_description = None
+    schema_fields = ()
+
+    if isinstance(field['type'], list):
+        if field['type'][0] == "null":
+            schema_mode = 'NULLABLE'
+        else:
+            schema_mode = 'required'
+        schema_type = field['type'][1]
+    else:
+        schema_type = field['type']
+    if schema_type == "array":
+        schema_type = "RECORD"
+        schema_mode = "REPEATED"
+        if "items" in field:
+            schema_fields = tuple([SchemaField(name, field['items']['type'], "NULLABLE", None, ())])
+    if schema_type == "object":
+        schema_type = "RECORD"
+        schema_fields = tuple(build_schema(field))
+    
+
+    if schema_type == "string":
+        if "format" in field:
+            if field['format'] == "date-time":
+                schema_type = "timestamp"
+
+    if schema_type == 'number':
+        schema_type = 'FLOAT'
+
+    return (schema_name, schema_type, schema_mode, schema_description, schema_fields)
+
 def build_schema(schema):
     SCHEMA = []
     for key in schema['properties'].keys():
-        schema_name = key
-        schema_type = "STRING"
-        schema_mode = "NULLABLE"
-        schema_fields = None
-
-        if isinstance(schema['properties'][key]['type'], list):
-            if schema['properties'][key]['type'][0] == "null":
-                schema_mode = 'NULLABLE'
-            else:
-                schema_mode = 'required'
-            schema_type = schema['properties'][key]['type'][1]
-        else:
-            schema_type = schema['properties'][key]['type']
-            if schema_type == schema['properties'][key]['type'] == "array":
-                schema_mode = "repeated"
-                if "items" in schema['properties'][key]:
-                    schema_fields = build_schema(schema['properties'][key])
-
-        if schema_type == "string":
-            if "format" in schema['properties'][key]:
-                if schema['properties'][key]['format'] == "date-time":
-                    schema_type = "timestamp"
-
-        SCHEMA.append(SchemaField(schema_name, schema_type, schema_mode, schema_fields))
+        schema_name, schema_type, schema_mode, schema_description, schema_fields = define_schema(schema['properties'][key], key)
+        SCHEMA.append(SchemaField(schema_name, schema_type, schema_mode, schema_description, schema_fields))
 
     return SCHEMA
 
-def persist_lines(project_id, dataset_id, table_id, lines):
+def persist_lines(project_id, dataset_id, table_id=None, lines=None):
     state = None
     schemas = {}
     key_properties = {}
+    tables = {}
 
-    rows = []
+    # rows = []
+
+    if table_id:
+        tables[table_id] = []
+
+    bigquery_client = bigquery.Client(project=project_id)
+
+    dataset_ref = bigquery_client.dataset(dataset_id)
+
+    dataset = Dataset(dataset_ref)
+    try:
+        dataset = bigquery_client.create_dataset(Dataset(dataset_ref)) or Dataset(dataset_ref)
+    except exceptions.Conflict:
+        pass
 
     for line in lines:
         try:
@@ -96,49 +123,53 @@ def persist_lines(project_id, dataset_id, table_id, lines):
             schema = schemas[msg.stream]
             validate(msg.record, schema)
 
-            bigquery_client = bigquery.Client(project=project_id)
-
-            dataset_ref = bigquery_client.dataset(dataset_id)
-            dataset = Dataset(dataset_ref)
-
-            try:
-                dataset = bigquery_client.create_dataset(Dataset(dataset_ref)) or Dataset(dataset_ref)
-            except exceptions.Conflict:
-                pass
-
-            table_ref = dataset.table(table_id)
-            table_schema = build_schema(schema)
-
-            table = bigquery.Table(table_ref, schema=table_schema)
-            try:
-                table = bigquery_client.create_table(table)
-            except exceptions.Conflict:
-                pass
-
-            rows.append(msg.record)
+            if table_id:
+                tables[table_id].append(msg.record)
+            else:
+                tables[msg.stream].append(msg.record)
 
             state = None
         elif isinstance(msg, singer.StateMessage):
             logger.debug('Setting state to {}'.format(msg.value))
             state = msg.value
         elif isinstance(msg, singer.SchemaMessage):
-            schemas[msg.stream] = msg.schema
-            key_properties[msg.stream] = msg.key_properties
+            if table_id:
+                table = table_id
+            else:
+                table = msg.stream 
+            tables[table] = []
+            schemas[table] = msg.schema
+            key_properties[table] = msg.key_properties
         elif isinstance(msg, singer.ActivateVersionMessage):
             # This is experimental and won't be used yet
             pass
         else:
             raise Exception("Unrecognized message {}".format(msg))
 
-    errors = bigquery_client.create_rows(table, rows)
+    for table_name in tables:
+        table_ref = dataset.table(table_name)
 
-    if not errors:
-        print('Loaded {} row(s) into {}:{}'.format(len(rows), dataset_id, table_id))
-    else:
-        print('Errors:')
-        pprint(errors)
+        table_schema = build_schema(schemas[table_name])
 
+        table = bigquery.Table(table_ref, schema=table_schema)
+        try:
+            table = bigquery_client.create_table(table)
+        except exceptions.Conflict:
+            pass
 
+        rows = tables[table_name]
+
+        rpt = False
+
+        rpt = has_repeats(table_schema)
+
+        errors = bigquery_client.create_rows(table, rows)
+
+        if not errors:
+            print('Loaded {} row(s) into {}:{}'.format(len(rows), dataset_id, table.table_id), table.path)
+
+        else:
+            print('Errors:', errors, sep=" ")
 
     return state
 
@@ -150,7 +181,7 @@ def collect():
         params = {
             'e': 'se',
             'aid': 'singer',
-            'se_ca': 'target-csv',
+            'se_ca': 'target-bigquery',
             'se_ac': 'open',
             'se_la': version,
         }
