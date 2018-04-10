@@ -159,10 +159,6 @@ def persist_lines(project_id, dataset_id, table_id=None, lines=None):
 
         rows = tables[table_name]
 
-        rpt = False
-
-        rpt = has_repeats(table_schema)
-
         errors = bigquery_client.create_rows(table, rows)
 
         if not errors:
