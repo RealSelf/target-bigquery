@@ -117,10 +117,16 @@ def persist_lines(project_id, dataset_id, table_id=None, lines=None):
             raise
 
         if isinstance(msg, singer.RecordMessage):
-            if msg.stream not in schemas:
+            if msg.stream not in schemas and table_id not in schemas:
+                print(msg.stream)
+                print(schemas)
                 raise Exception("A record for stream {} was encountered before a corresponding schema".format(msg.stream))
 
-            schema = schemas[msg.stream]
+            if msg.stream in schemas:
+                schema = schemas[msg.stream]
+            else:
+                schema = schemas[table_id]
+
             validate(msg.record, schema)
 
             if table_id:
@@ -199,7 +205,7 @@ def main():
 
     input = io.TextIOWrapper(sys.stdin.buffer, encoding='utf-8')
 
-    state = persist_lines(config['project_id'], config['dataset_id'], config['table_id'], input)
+    state = persist_lines(config['project_id'], config['dataset_id'], config.get('table_id', None), input)
     emit_state(state)
     logger.debug("Exiting normally")
 
