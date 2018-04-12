@@ -52,6 +52,13 @@ def define_schema(field, name):
     schema_description = None
     schema_fields = ()
 
+    if 'type' not in field and 'anyOf' in field:
+        for types in field['anyOf']:
+            if types['type'] == 'null':
+                schema_mode = 'NULLABLE'
+            else:
+                field = types
+            
     if isinstance(field['type'], list):
         if field['type'][0] == "null":
             schema_mode = 'NULLABLE'
@@ -88,21 +95,17 @@ def build_schema(schema):
 
     return SCHEMA
 
-def persist_lines(project_id, dataset_id, table_id=None, lines=None):
+def persist_lines(project_id, dataset_id, lines=None):
     state = None
     schemas = {}
     key_properties = {}
     tables = {}
-
-    # rows = []
-
-    if table_id:
-        tables[table_id] = []
+    rows = {}
+    errors = {}
 
     bigquery_client = bigquery.Client(project=project_id)
 
     dataset_ref = bigquery_client.dataset(dataset_id)
-
     dataset = Dataset(dataset_ref)
     try:
         dataset = bigquery_client.create_dataset(Dataset(dataset_ref)) or Dataset(dataset_ref)
@@ -117,61 +120,46 @@ def persist_lines(project_id, dataset_id, table_id=None, lines=None):
             raise
 
         if isinstance(msg, singer.RecordMessage):
-            if msg.stream not in schemas and table_id not in schemas:
-                print(msg.stream)
-                print(schemas)
+            if msg.stream not in schemas:
                 raise Exception("A record for stream {} was encountered before a corresponding schema".format(msg.stream))
 
-            if msg.stream in schemas:
-                schema = schemas[msg.stream]
-            else:
-                schema = schemas[table_id]
+            schema = schemas[msg.stream]
 
             validate(msg.record, schema)
 
-            if table_id:
-                tables[table_id].append(msg.record)
-            else:
-                tables[msg.stream].append(msg.record)
+            errors[msg.stream] = bigquery_client.create_rows(tables[msg.stream], [msg.record])
+            rows[msg.stream] += 1
 
             state = None
+
         elif isinstance(msg, singer.StateMessage):
             logger.debug('Setting state to {}'.format(msg.value))
             state = msg.value
+
         elif isinstance(msg, singer.SchemaMessage):
-            if table_id:
-                table = table_id
-            else:
-                table = msg.stream 
-            tables[table] = []
+            table = msg.stream 
             schemas[table] = msg.schema
             key_properties[table] = msg.key_properties
+            tables[table] = bigquery.Table(dataset.table(table), schema=build_schema(schemas[table]))
+            rows[table] = 0
+            errors[table] = None
+            try:
+                tables[table] = bigquery_client.create_table(tables[table])
+            except exceptions.Conflict:
+                pass
+
         elif isinstance(msg, singer.ActivateVersionMessage):
             # This is experimental and won't be used yet
             pass
+
         else:
             raise Exception("Unrecognized message {}".format(msg))
 
-    for table_name in tables:
-        table_ref = dataset.table(table_name)
-
-        table_schema = build_schema(schemas[table_name])
-
-        table = bigquery.Table(table_ref, schema=table_schema)
-        try:
-            table = bigquery_client.create_table(table)
-        except exceptions.Conflict:
-            pass
-
-        rows = tables[table_name]
-
-        errors = bigquery_client.create_rows(table, rows)
-
-        if not errors:
-            print('Loaded {} row(s) into {}:{}'.format(len(rows), dataset_id, table.table_id), table.path)
-
+    for table in errors.keys():
+        if not errors[table]:
+            print('Loaded {} row(s) into {}:{}'.format(rows[table], dataset_id, table), tables[table].path)
         else:
-            print('Errors:', errors, sep=" ")
+            print('Errors:', errors[table], sep=" ")
 
     return state
 
@@ -205,7 +193,7 @@ def main():
 
     input = io.TextIOWrapper(sys.stdin.buffer, encoding='utf-8')
 
-    state = persist_lines(config['project_id'], config['dataset_id'], config.get('table_id', None), input)
+    state = persist_lines(config['project_id'], config['dataset_id'], input)
     emit_state(state)
     logger.debug("Exiting normally")
 
