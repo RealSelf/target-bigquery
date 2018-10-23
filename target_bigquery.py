@@ -74,14 +74,11 @@ def define_schema(field, name):
     else:
         schema_type = field['type']
     if schema_type == "array":
-        schema_type = "RECORD"
+        schema_type = field.get('items').get('type')
         schema_mode = "REPEATED"
-        if "items" in field:
-            schema_fields = tuple([SchemaField(name, field['items']['type'], "NULLABLE", None, ())])
     if schema_type == "object":
         schema_type = "RECORD"
         schema_fields = tuple(build_schema(field))
-    
 
     if schema_type == "string":
         if "format" in field:
@@ -168,8 +165,11 @@ def persist_lines_job(project_id, dataset_id, lines=None):
         load_config.schema = SCHEMA
         load_config.source_format = SourceFormat.NEWLINE_DELIMITED_JSON
         rows[table].seek(0)
-        bigquery_client.load_table_from_file(
+        logger.info("loading {} to Bigquery.\n".format(table))
+        load_job = bigquery_client.load_table_from_file(
             rows[table], table_ref, job_config=load_config)
+        logger.info("loading job {}".format(load_job.job_id))
+        logger.info(load_job.result())
 
 
     # for table in errors.keys():
