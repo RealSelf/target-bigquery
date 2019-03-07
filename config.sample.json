@@ -1,5 +1,6 @@
 {
     "project_id": "bigquery-public-data",
     "dataset_id": "samples",
-    "table_id": "github_timeline"
+    "table_id": "github_timeline",
+    "validate_records": true
 }
