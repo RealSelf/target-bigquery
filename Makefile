@@ -10,4 +10,4 @@ upload: dist
 	python3 -m twine upload dist/*
 
 cleanup:
-	if [ -d "dist" ]; rm -rf old_dist; fi
+	if [ -d "dist" ]; then rm -rf old_dist; fi
