@@ -70,7 +70,7 @@ def define_schema(field, name):
             schema_mode = 'NULLABLE'
         else:
             schema_mode = 'required'
-        schema_type = field['type'][1]
+        schema_type = field['type'][-1]
     else:
         schema_type = field['type']
     if schema_type == "object":
@@ -97,6 +97,11 @@ def define_schema(field, name):
 def build_schema(schema):
     SCHEMA = []
     for key in schema['properties'].keys():
+        
+        if not (bool(schema['properties'][key])):
+            # if we endup with an empty record.
+            continue
+
         schema_name, schema_type, schema_mode, schema_description, schema_fields = define_schema(schema['properties'][key], key)
         SCHEMA.append(SchemaField(schema_name, schema_type, schema_mode, schema_description, schema_fields))
 
